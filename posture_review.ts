@@ -1,5 +1,5 @@
 /**
- * Posture Summary Script (v11 - Replaced Problematic forEach with for...of)
+ * Posture Summary Script (v12 - Replaced map/filter with for...of)
  *
  * Reads application posture data from various sheets defined in a 'Config' sheet,
  * aggregates the data based on specified methods (List, Count, Sum, Average, Min, Max, UniqueList),
@@ -7,15 +7,16 @@
  * Conditional formatting has been removed.
  *
  * Key changes:
- * - Replaced a specific .forEach callback inside the 'Count' aggregation case
- *   with a standard for...of loop to address potential Office Scripts nesting restrictions.
+ * - Replaced .map().filter() chain in numeric aggregation cases with a for...of loop
+ *   to address potential Office Scripts nesting restrictions.
+ * - Replaced a specific .forEach callback inside the 'Count' aggregation case.
  * - Moved the nested 'getValues' helper function outside the main data processing loop.
  * - Confirmed necessary 'await' usage.
- * - Verified remaining array method callbacks use arrow functions.
+ * - Verified remaining array method callbacks use arrow functions where allowed.
  * - Addressed other previous compatibility fixes.
  */
 async function main(workbook: ExcelScript.Workbook) {
-    console.log("Starting posture summary script (v11: Replaced Problematic forEach)...");
+    console.log("Starting posture summary script (v12: Replaced map/filter)...");
     const startTime = Date.now();
   
     // --- Overall Constants ---
@@ -48,7 +49,7 @@ async function main(workbook: ExcelScript.Workbook) {
     // --- Helper Functions ---
   
     /**
-     * Finds the 0-based index of the first matching header in a row. Case-insensitive search.
+     * Finds the 0-based index of the first matching header in a row.
      */
     function findColumnIndex(headerRowValues: (string | number | boolean)[], possibleHeaders: string[]): number {
       // Synchronous
@@ -56,9 +57,7 @@ async function main(workbook: ExcelScript.Workbook) {
         if (!header) continue;
         const lowerHeader = header.toString().toLowerCase();
         const index = headerRowValues.findIndex(h => h?.toString().toLowerCase() === lowerHeader); // Arrow func OK
-        if (index !== -1) {
-          return index;
-        }
+        if (index !== -1) { return index; }
       }
       return -1;
     }
@@ -68,9 +67,7 @@ async function main(workbook: ExcelScript.Workbook) {
      */
     function parseNumber(value: string | number | boolean | null | undefined): number | null {
       // Synchronous
-      if (value === null || typeof value === 'undefined' || value === "") {
-        return null;
-      }
+      if (value === null || typeof value === 'undefined' || value === "") { return null; }
       const cleanedValue = typeof value === 'string' ? value.replace(/[^0-9.-]+/g, "") : value;
       const num: number = Number(cleanedValue);
       return isNaN(num) ? null : num;
@@ -126,12 +123,12 @@ async function main(workbook: ExcelScript.Workbook) {
        console.log("Missing essential config columns"); return;
     }
   
-    // Parse config (Sync loop, uses arrow funcs in map/filter)
+    // Parse config (Sync loop, uses arrow funcs in map/filter where safe)
     const POSTURE_SHEETS_CONFIG: PostureSheetConfig[] = [];
     let configIsValid = true;
     for (let i = 1; i < configValues.length; i++) {
          const row = configValues[i];
-         const cleanRow = row.map(val => typeof val === 'string' ? val.trim() : val); // Arrow func
+         const cleanRow = row.map(val => typeof val === 'string' ? val.trim() : val); // Arrow func OK here
          const isEnabled = cleanRow[colIdxIsEnabled]?.toString().toUpperCase() === "TRUE";
          if (!isEnabled) continue;
          const sheetName = cleanRow[colIdxSheetName]?.toString() ?? "";
@@ -141,8 +138,8 @@ async function main(workbook: ExcelScript.Workbook) {
          const countByHeader = colIdxCountBy !== -1 ? cleanRow[colIdxCountBy]?.toString() ?? undefined : undefined;
          const valueHeader = colIdxValueHeader !== -1 ? cleanRow[colIdxValueHeader]?.toString() ?? undefined : undefined;
           if (!sheetName || !appIdHeadersRaw || (!dataHeadersRaw && aggTypeRaw !== "Count")) { console.log(`Warning: Config (Row ${i + 1}): Skipping row...`); continue; }
-         const appIdHeaders = appIdHeadersRaw.split(',').map(h => h.trim()).filter(h => h); // Arrow funcs
-         const dataHeadersToPull = dataHeadersRaw.split(',').map(h => h.trim()).filter(h => h); // Arrow funcs
+         const appIdHeaders = appIdHeadersRaw.split(',').map(h => h.trim()).filter(h => h); // Arrow funcs OK here
+         const dataHeadersToPull = dataHeadersRaw.split(',').map(h => h.trim()).filter(h => h); // Arrow funcs OK here
           if (appIdHeaders.length === 0) { console.log(`Warning: Config (Row ${i + 1}, Sheet: ${sheetName}): AppIdHeaders empty. Skipping.`); continue; }
          let aggregationType = "List" as AggregationMethod;
          const normalizedAggType = aggTypeRaw.charAt(0).toUpperCase() + aggTypeRaw.slice(1).toLowerCase();
@@ -194,10 +191,10 @@ async function main(workbook: ExcelScript.Workbook) {
       const appIdColIndex = findColumnIndex(postureHeaderRow, config.appIdHeaders); // Sync
       if (appIdColIndex === -1) { console.log(`Warning: App ID header not found in ${config.sheetName}.`); continue; }
   
-      // Find indices (Sync, uses arrow funcs in forEach)
+      // Find indices (Sync, uses arrow funcs where safe)
       const dataColIndicesMap = new Map<string, number>();
       let requiredHeaderMissing = false;
-      config.dataHeadersToPull.forEach(header => { /* ... find index logic ... */
+      config.dataHeadersToPull.forEach(header => { // Arrow func OK here
           const index = findColumnIndex(postureHeaderRow, [header]);
           if (index !== -1) { dataColIndicesMap.set(header, index); }
           else { console.log(`Warning: Data column "${header}" not found in ${config.sheetName}.`); if ((["Sum", "Average", "Min", "Max"].includes(config.aggregationType) && header === config.valueHeaderForAggregation) || (config.aggregationType === "UniqueList" && header === config.dataHeadersToPull[0] && config.dataHeadersToPull.length === 1)) { console.log(`Error: Critical header "${header}" missing.`); requiredHeaderMissing = true; } }
@@ -209,15 +206,15 @@ async function main(workbook: ExcelScript.Workbook) {
       if (requiredHeaderMissing) continue;
       if (dataColIndicesMap.size === 0) { console.log(`Warning: No columns found for ${config.sheetName}.`); continue; }
   
-      // Populate map (Sync loop, uses arrow func in forEach)
+      // Populate map (Sync loop, uses arrow func where safe)
       let rowsProcessed = 0;
-      for (let i = 1; i < postureValues.length; i++) { /* ... data population logic ... */
+      for (let i = 1; i < postureValues.length; i++) {
         const row = postureValues[i];
         const appId = row[appIdColIndex]?.toString().trim();
         if (appId && masterAppIds.has(appId)) {
           if (!postureDataMap[appId]) { postureDataMap[appId] = {}; }
           const appData = postureDataMap[appId];
-          dataColIndicesMap.forEach((colIndex, headerName) => {
+          dataColIndicesMap.forEach((colIndex, headerName) => { // Arrow func OK here
             const value = row[colIndex];
             if (value !== null && typeof value !== 'undefined' && value !== "") {
               if (!appData[headerName]) { appData[headerName] = []; }
@@ -238,16 +235,16 @@ async function main(workbook: ExcelScript.Workbook) {
     const summarySheet = workbook.addWorksheet(SUMMARY_SHEET_NAME); // Sync
     summarySheet.activate(); // Sync
   
-    // Generate headers (Sync, uses arrow funcs in forEach)
+    // Generate headers (Sync, uses arrow funcs where safe)
     const summaryHeaders: string[] = [MASTER_APP_ID_HEADER];
     const headerConfigMapping: { header: string, config: PostureSheetConfig, sourceValueHeader?: string }[] = [];
-    POSTURE_SHEETS_CONFIG.forEach(config => { /* ... switch case logic ... */
+    POSTURE_SHEETS_CONFIG.forEach(config => { // Arrow func OK here
         const aggType = config.aggregationType;
         switch (aggType) {
               case "Count": { const header = `${config.countByHeader} Count Summary`; summaryHeaders.push(header); headerConfigMapping.push({ header, config, sourceValueHeader: config.countByHeader }); break; }
               case "Sum": case "Average": case "Min": case "Max": { const header = `${config.sheetName} ${aggType} (${config.valueHeaderForAggregation})`; summaryHeaders.push(header); headerConfigMapping.push({ header, config, sourceValueHeader: config.valueHeaderForAggregation }); break; }
               case "UniqueList": { const uniqueHeaderSource = config.dataHeadersToPull[0]; const header = `${config.sheetName} Unique ${uniqueHeaderSource}`; summaryHeaders.push(header); headerConfigMapping.push({ header, config, sourceValueHeader: uniqueHeaderSource }); break; }
-              case "List": default: { config.dataHeadersToPull.forEach(originalHeader => { summaryHeaders.push(originalHeader); headerConfigMapping.push({ header: originalHeader, config }); }); break; }
+              case "List": default: { config.dataHeadersToPull.forEach(originalHeader => { summaryHeaders.push(originalHeader); headerConfigMapping.push({ header: originalHeader, config }); }); break; } // Arrow func OK here
         }
     });
   
@@ -269,91 +266,96 @@ async function main(workbook: ExcelScript.Workbook) {
     const outputData: (string | number | boolean)[][] = []; // Sync init
     const masterAppIdArray = Array.from(masterAppIds).sort(); // Sync
   
-    // Process data (Sync loop, uses arrow funcs)
-    masterAppIdArray.forEach(appId => { // Outer forEach (arrow func OK)
+    // Process data (Sync loop, uses arrow funcs where safe)
+    masterAppIdArray.forEach(appId => { // Arrow func OK here
       const row: (string | number | boolean)[] = [appId];
   
-      // Inner forEach (arrow func OK)
-      POSTURE_SHEETS_CONFIG.forEach(config => {
+      // Inner loop processing configs
+      POSTURE_SHEETS_CONFIG.forEach(config => { // Arrow func OK here
         const aggType = config.aggregationType;
         try {
-          // All aggregation logic IS synchronous
+          // Aggregation logic
           switch (aggType) {
-            // ##############################################
-            // START OF REFACTORED 'Count' CASE
-            // ##############################################
             case "Count": {
               let outputValue: string | number = DEFAULT_VALUE_MISSING;
-              // Use the moved helper function
               const valuesToCount = getValuesFromMap(postureDataMap, appId, config.countByHeader!); // Sync call
               if (valuesToCount && valuesToCount.length > 0) {
                 const counts = new Map<string | number | boolean, number>(); // Sync init
-  
-                // Replace valuesToCount.forEach with a for...of loop
+                // Use for...of loop instead of forEach
                 for (const value of valuesToCount) { // Sync loop
                     counts.set(value, (counts.get(value) || 0) + 1);
                 }
-  
-                // Sort the map entries first (this part uses array methods safely)
-                const sortedEntries = Array.from(counts.entries()) // Sync
-                    .sort((a, b) => a[0].toString().localeCompare(b[0].toString())); // Arrow func for sort OK
-  
+                // Array.from/sort OK with arrow func
+                const sortedEntries = Array.from(counts.entries())
+                    .sort((a, b) => a[0].toString().localeCompare(b[0].toString()));
                 const countEntries: string[] = []; // Sync init
-  
-                // Replace the final .forEach with a for...of loop (TARGETS LINE 352 issue)
+                // Use for...of loop instead of forEach
                 for (const [value, count] of sortedEntries) { // Sync loop
                     countEntries.push(`${value}: ${count}`);
                 }
-  
                 outputValue = countEntries.join('\n'); // Sync
               } else { outputValue = 0; }
               row.push(outputValue); // Sync
               break;
             }
             // ##############################################
-            // END OF REFACTORED 'Count' CASE
+            // START OF REFACTORED Sum/Avg/Min/Max CASE
             // ##############################################
             case "Sum": case "Average": case "Min": case "Max": {
               let outputValue: string | number | boolean = DEFAULT_VALUE_MISSING;
               const valuesToAggregate = getValuesFromMap(postureDataMap, appId, config.valueHeaderForAggregation!); // Sync call
-              // Arrow funcs used in map/filter OK
-              const numericValues = valuesToAggregate?.map(parseNumber).filter(n => n !== null) as number[] | undefined;
-              if (numericValues && numericValues.length > 0) {
-                // Arrow funcs used in reduce OK
+  
+              // Replace .map().filter() with a for...of loop (TARGETS LINE 320 issue)
+              const numericValues: number[] = []; // Sync init
+              if (valuesToAggregate) { // Sync check
+                  for (const value of valuesToAggregate) { // Sync loop
+                      const num = parseNumber(value); // Sync call
+                      if (num !== null) { // Sync check
+                          numericValues.push(num); // Sync push
+                      }
+                  }
+              }
+  
+              if (numericValues.length > 0) { // Sync check
+                // .reduce generally OK with arrow func, but can be replaced if needed
                 if (aggType === "Sum") { outputValue = numericValues.reduce((s, c) => s + c, 0); }
                 else if (aggType === "Average") { let avg = numericValues.reduce((s, c) => s + c, 0) / numericValues.length; outputValue = parseFloat(avg.toFixed(2)); }
+                // Math.min/max are sync
                 else if (aggType === "Min") { outputValue = Math.min(...numericValues); }
                 else if (aggType === "Max") { outputValue = Math.max(...numericValues); }
               }
-              row.push(outputValue);
+              row.push(outputValue); // Sync
               break;
             }
+            // ##############################################
+            // END OF REFACTORED Sum/Avg/Min/Max CASE
+            // ##############################################
             case "UniqueList": {
               let outputValue: string | number | boolean = DEFAULT_VALUE_MISSING;
               const headerForUniqueList = config.dataHeadersToPull[0];
               if (headerForUniqueList) {
                 const valuesToList = getValuesFromMap(postureDataMap, appId, headerForUniqueList); // Sync call
                 if (valuesToList && valuesToList.length > 0) {
-                  // Arrow funcs used in map/sort OK
+                  // Array.from/Set/map/sort OK with arrow funcs
                   const uniqueValues = Array.from(new Set(valuesToList.map(v => v?.toString() ?? "")));
                   uniqueValues.sort((a, b) => a.localeCompare(b));
-                  outputValue = uniqueValues.join('\n');
+                  outputValue = uniqueValues.join('\n'); // Sync
                 }
               }
-              row.push(outputValue);
+              row.push(outputValue); // Sync
               break;
             }
             case "List": default: {
-              // Arrow func used in forEach OK
+              // .forEach OK with arrow func here
               config.dataHeadersToPull.forEach(header => {
                 let listOutput: string | number | boolean = DEFAULT_VALUE_MISSING;
                 const valuesToList = getValuesFromMap(postureDataMap, appId, header); // Sync call
                 if (valuesToList && valuesToList.length > 0) {
-                   // Arrow funcs used in map/sort OK
+                   // map/sort OK with arrow funcs
                    const sortedValues = valuesToList.map(v => v?.toString() ?? "").sort((a,b) => a.localeCompare(b));
-                   listOutput = sortedValues.join('\n');
+                   listOutput = sortedValues.join('\n'); // Sync
                 }
-                row.push(listOutput);
+                row.push(listOutput); // Sync
               });
               break;
             }
@@ -361,11 +363,11 @@ async function main(workbook: ExcelScript.Workbook) {
         } catch (e: unknown) { /* ... error handling ... */
               let errorMessage = "Unknown error"; if (e instanceof Error) { errorMessage = e.message; } else { errorMessage = String(e); }
               console.log(`Error during aggregation type "${aggType}" for App "${appId}", Sheet "${config.sheetName}": ${errorMessage}`);
-              if (aggType === 'List') { config.dataHeadersToPull.forEach(() => row.push('ERROR')); } // Arrow func OK
+              if (aggType === 'List') { config.dataHeadersToPull.forEach(() => row.push('ERROR')); } // Arrow func OK here
               else { row.push('ERROR'); }
         }
       }); // End inner POSTURE_SHEETS_CONFIG.forEach
-      outputData.push(row);
+      outputData.push(row); // Sync
     }); // End outer masterAppIdArray.forEach
   
   
