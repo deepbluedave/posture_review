@@ -1,5 +1,5 @@
 /**
- * Posture Summary Script (v7 - Office Scripts Compatibility Fixes)
+ * Posture Summary Script (v8 - Office Scripts Compatibility & Syntax Fixes)
  *
  * Reads application posture data from various sheets defined in a 'Config' sheet,
  * aggregates the data based on specified methods (List, Count, Sum, Average, Min, Max, UniqueList),
@@ -12,12 +12,14 @@
  * - Switched nested Map structure to use plain objects.
  * - Added explicit typing for catch block errors (e: unknown).
  * - Corrected 'any' type usage in parseNumber.
- * - Removed unnecessary 'await' from synchronous formatting/object retrieval calls.
+ * - Removed unnecessary 'await' from synchronous calls.
+ * - Corrected autofitColumns method usage.
+ * - Ensured all array method callbacks use arrow functions.
  * - Ensured necessary 'await' keywords are present for asynchronous operations.
  */
 async function main(workbook: ExcelScript.Workbook) {
-    console.log("Starting posture summary script (v7: Office Scripts Compatibility Fixes)...");
-    const startTime = Date.now(); // For performance timing
+    console.log("Starting posture summary script (v8: Office Scripts Compatibility & Syntax Fixes)...");
+    const startTime = Date.now();
   
     // --- Overall Constants ---
     const MASTER_APP_SHEET_NAME: string = "Applications";
@@ -50,11 +52,13 @@ async function main(workbook: ExcelScript.Workbook) {
   
     /**
      * Finds the 0-based index of the first matching header in a row. Case-insensitive search.
+     * Uses arrow function for findIndex callback.
      */
     function findColumnIndex(headerRowValues: (string | number | boolean)[], possibleHeaders: string[]): number {
       for (const header of possibleHeaders) {
         if (!header) continue;
         const lowerHeader = header.toString().toLowerCase();
+        // Use arrow function for findIndex callback
         const index = headerRowValues.findIndex(h => h?.toString().toLowerCase() === lowerHeader);
         if (index !== -1) {
           return index;
@@ -65,24 +69,19 @@ async function main(workbook: ExcelScript.Workbook) {
   
     /**
      * Safely parses a value into a number. Handles various non-numeric inputs.
-     * Uses specific types instead of 'any' for better compatibility.
-     * @param value The value to parse (typically string, number, boolean, null, or undefined from getValues()).
-     * @returns The parsed number, or null if parsing fails or input is invalid.
      */
-    function parseNumber(value: string | number | boolean | null | undefined): number | null { // Changed 'any' to specific types
+    function parseNumber(value: string | number | boolean | null | undefined): number | null {
       if (value === null || typeof value === 'undefined' || value === "") {
         return null;
       }
-      // Clean string values before converting
       const cleanedValue = typeof value === 'string' ? value.replace(/[^0-9.-]+/g, "") : value;
-      // Explicitly type 'num'
       const num: number = Number(cleanedValue);
       return isNaN(num) ? null : num;
     }
   
     // --- 1. Read Configuration from the "Config" Sheet ---
     console.log(`Reading configuration from sheet: ${CONFIG_SHEET_NAME}`);
-    const configSheet = workbook.getWorksheet(CONFIG_SHEET_NAME);
+    const configSheet = workbook.getWorksheet(CONFIG_SHEET_NAME); // Synchronous
     if (!configSheet) {
       console.log(`Error: Configuration sheet "${CONFIG_SHEET_NAME}" not found. Script cannot proceed.`);
       return;
@@ -90,13 +89,12 @@ async function main(workbook: ExcelScript.Workbook) {
   
     let configValues: (string | number | boolean)[][] = [];
     let configHeaderRow: (string | number | boolean)[];
-    const configTable = configSheet.getTable(CONFIG_TABLE_NAME);
+    const configTable = configSheet.getTable(CONFIG_TABLE_NAME); // Synchronous
   
     if (configTable) {
       console.log(`Using table "${CONFIG_TABLE_NAME}" for configuration.`);
-      const configRangeWithHeader = configTable.getHeaderRowRange().getResizedRange(configTable.getRowCount(), 0);
-      // Reading values from Excel IS asynchronous
-      configValues = await configRangeWithHeader.getValues(); // Await NEEDED here
+      const configRangeWithHeader = configTable.getHeaderRowRange().getResizedRange(configTable.getRowCount(), 0); // Synchronous
+      configValues = await configRangeWithHeader.getValues(); // Asynchronous
       if (configValues.length <= 1) {
         console.log(`Error: Configuration table "${CONFIG_TABLE_NAME}" has no data rows.`);
         return;
@@ -104,17 +102,16 @@ async function main(workbook: ExcelScript.Workbook) {
       configHeaderRow = configValues[0];
     } else {
       console.log(`Table "${CONFIG_TABLE_NAME}" not found. Using used range on "${CONFIG_SHEET_NAME}".`);
-      const configRange = configSheet.getUsedRange();
-      if (!configRange || configRange.getRowCount() <= 1) {
+      const configRange = configSheet.getUsedRange(); // Synchronous
+      if (!configRange || configRange.getRowCount() <= 1) { // getRowCount is synchronous
         console.log(`Error: Configuration sheet "${CONFIG_SHEET_NAME}" is empty or has only headers.`);
         return;
       }
-      // Reading values from Excel IS asynchronous
-      configValues = await configRange.getValues(); // Await NEEDED here
+      configValues = await configRange.getValues(); // Asynchronous
       configHeaderRow = configValues[0];
     }
   
-    // Find indices (synchronous operations)
+    // Finding indices is synchronous
     const colIdxIsEnabled = findColumnIndex(configHeaderRow, ["IsEnabled"]);
     const colIdxSheetName = findColumnIndex(configHeaderRow, ["SheetName"]);
     const colIdxAppIdHeaders = findColumnIndex(configHeaderRow, ["AppIdHeaders", "App ID Headers"]);
@@ -123,6 +120,7 @@ async function main(workbook: ExcelScript.Workbook) {
     const colIdxCountBy = findColumnIndex(configHeaderRow, ["CountByHeader", "Count By"]);
     const colIdxValueHeader = findColumnIndex(configHeaderRow, ["ValueHeaderForAggregation", "Value Header"]);
   
+    // Using 'some' with arrow function callback
     if ([colIdxIsEnabled, colIdxSheetName, colIdxAppIdHeaders, colIdxDataHeaders, colIdxAggType].some(idx => idx === -1)) {
       console.log("Error: One or more essential columns (IsEnabled, SheetName, AppIdHeaders, DataHeadersToPull, AggregationType) are missing in the Config sheet/table headers.");
       return;
@@ -130,9 +128,10 @@ async function main(workbook: ExcelScript.Workbook) {
   
     const POSTURE_SHEETS_CONFIG: PostureSheetConfig[] = [];
     let configIsValid = true;
-    // Parsing config values is synchronous
+    // Parsing config is synchronous
     for (let i = 1; i < configValues.length; i++) {
       const row = configValues[i];
+      // Using 'map' with arrow function callback
       const cleanRow = row.map(val => typeof val === 'string' ? val.trim() : val);
   
       const isEnabled = cleanRow[colIdxIsEnabled]?.toString().toUpperCase() === "TRUE";
@@ -150,6 +149,7 @@ async function main(workbook: ExcelScript.Workbook) {
           continue;
       }
   
+      // Using 'map' and 'filter' with arrow function callbacks
       const appIdHeaders = appIdHeadersRaw.split(',').map(h => h.trim()).filter(h => h);
       const dataHeadersToPull = dataHeadersRaw.split(',').map(h => h.trim()).filter(h => h);
   
@@ -160,6 +160,7 @@ async function main(workbook: ExcelScript.Workbook) {
   
       let aggregationType = "List" as AggregationMethod;
       const normalizedAggType = aggTypeRaw.charAt(0).toUpperCase() + aggTypeRaw.slice(1).toLowerCase();
+      // Using 'includes' (not a callback method)
       if (["List", "Count", "Sum", "Average", "Min", "Max", "UniqueList"].includes(normalizedAggType)) {
         aggregationType = normalizedAggType as AggregationMethod;
       } else {
@@ -204,35 +205,32 @@ async function main(workbook: ExcelScript.Workbook) {
   
     // --- 2. Read Master App IDs ---
     console.log(`Reading master App IDs from sheet: ${MASTER_APP_SHEET_NAME}, Header: ${MASTER_APP_ID_HEADER}`);
-    const masterSheet = workbook.getWorksheet(MASTER_APP_SHEET_NAME);
+    const masterSheet = workbook.getWorksheet(MASTER_APP_SHEET_NAME); // Synchronous
     if (!masterSheet) {
         console.log(`Error: Master sheet "${MASTER_APP_SHEET_NAME}" not found.`);
         return;
     }
   
-    const masterRange = masterSheet.getUsedRange();
+    const masterRange = masterSheet.getUsedRange(); // Synchronous
     if (!masterRange) {
         console.log(`Error: Master sheet "${MASTER_APP_SHEET_NAME}" appears to be empty.`);
         return;
     }
-    // Reading values IS asynchronous
-    const masterValues = await masterRange.getValues(); // Await NEEDED
+    const masterValues = await masterRange.getValues(); // Asynchronous
     if (masterValues.length <= 1) {
         console.log(`Error: Master sheet "${MASTER_APP_SHEET_NAME}" contains only headers or is empty.`);
          return;
     }
   
     const masterHeaderRow = masterValues[0];
-    // Finding index is synchronous
-    const masterAppIdColIndex = findColumnIndex(masterHeaderRow, [MASTER_APP_ID_HEADER]);
+    const masterAppIdColIndex = findColumnIndex(masterHeaderRow, [MASTER_APP_ID_HEADER]); // Synchronous
     if (masterAppIdColIndex === -1) {
         console.log(`Error: Master App ID column "${MASTER_APP_ID_HEADER}" not found in sheet "${MASTER_APP_SHEET_NAME}".`);
         return;
     }
   
-    // Populating the Set is synchronous
-    const masterAppIds = new Set<string>();
-    for (let i = 1; i < masterValues.length; i++) {
+    const masterAppIds = new Set<string>(); // Synchronous
+    for (let i = 1; i < masterValues.length; i++) { // Synchronous loop
       const appId = masterValues[i][masterAppIdColIndex]?.toString().trim();
       if (appId && appId !== "") {
           masterAppIds.add(appId);
@@ -246,25 +244,24 @@ async function main(workbook: ExcelScript.Workbook) {
   
     // --- 3. Process Posture Sheets and Aggregate Data ---
     console.log("Processing posture sheets based on configuration...");
-    const postureDataMap: PostureDataObject = {};
+    const postureDataMap: PostureDataObject = {}; // Synchronous
   
-    // Using 'for...of' allows 'await' for getValues inside the loop
+    // Using 'for...of' allows 'await' inside for getValues
     for (const config of POSTURE_SHEETS_CONFIG) {
       console.log(`Processing sheet: ${config.sheetName} (Type: ${config.aggregationType})`);
-      const postureSheet = workbook.getWorksheet(config.sheetName);
+      const postureSheet = workbook.getWorksheet(config.sheetName); // Synchronous
       if (!postureSheet) {
           console.log(`Warning: Sheet "${config.sheetName}" specified in config not found. Skipping.`);
           continue;
       }
   
-      const postureRange = postureSheet.getUsedRange();
-      if (!postureRange || postureRange.getRowCount() <= 1) {
+      const postureRange = postureSheet.getUsedRange(); // Synchronous
+      if (!postureRange || postureRange.getRowCount() <= 1) { // getRowCount is synchronous
           console.log(`Warning: Sheet "${config.sheetName}" is empty or contains only headers. Skipping.`);
           continue;
       }
   
-      // Reading values IS asynchronous
-      const postureValues = await postureRange.getValues(); // Await NEEDED
+      const postureValues = await postureRange.getValues(); // Asynchronous
       const postureHeaderRow = postureValues[0];
   
       // Finding indices is synchronous
@@ -274,11 +271,12 @@ async function main(workbook: ExcelScript.Workbook) {
           continue;
       }
   
-      const dataColIndicesMap = new Map<string, number>();
+      const dataColIndicesMap = new Map<string, number>(); // Synchronous
       let requiredHeaderMissing = false;
   
       // Finding indices and validating config is synchronous
-      config.dataHeadersToPull.forEach(header => { /* ... synchronous ... */
+      // Using 'forEach' with arrow function callback
+      config.dataHeadersToPull.forEach(header => {
         const index = findColumnIndex(postureHeaderRow, [header]);
         if (index !== -1) {
           dataColIndicesMap.set(header, index);
@@ -296,7 +294,7 @@ async function main(workbook: ExcelScript.Workbook) {
       });
       if (requiredHeaderMissing) continue;
   
-      if (config.aggregationType === "Count" && config.countByHeader) { /* ... synchronous ... */
+      if (config.aggregationType === "Count" && config.countByHeader) { // Synchronous check
           const countByColIndex = findColumnIndex(postureHeaderRow, [config.countByHeader]);
           if (countByColIndex === -1) {
               console.log(`Error: Critical header "${config.countByHeader}" (CountByHeader) is missing in sheet "${config.sheetName}". Skipping sheet.`);
@@ -308,7 +306,7 @@ async function main(workbook: ExcelScript.Workbook) {
       }
       if (requiredHeaderMissing) continue;
   
-      if (["Sum", "Average", "Min", "Max"].includes(config.aggregationType) && config.valueHeaderForAggregation) { /* ... synchronous ... */
+      if (["Sum", "Average", "Min", "Max"].includes(config.aggregationType) && config.valueHeaderForAggregation) { // Synchronous check
           if (!dataColIndicesMap.has(config.valueHeaderForAggregation)) {
                console.log(`Error: Internal Error/Config Issue: ValueHeaderForAggregation "${config.valueHeaderForAggregation}" not found in collected indices map. Skipping sheet "${config.sheetName}".`);
                requiredHeaderMissing = true;
@@ -316,23 +314,24 @@ async function main(workbook: ExcelScript.Workbook) {
       }
       if (requiredHeaderMissing) continue;
   
-      if (dataColIndicesMap.size === 0) {
+      if (dataColIndicesMap.size === 0) { // Synchronous check
         console.log(`Warning: No relevant data columns found in "${config.sheetName}". Skipping.`);
         continue;
       }
   
-      // Populating the postureDataMap object from the retrieved postureValues IS synchronous
+      // Populating the postureDataMap object IS synchronous
       let rowsProcessed = 0;
-      for (let i = 1; i < postureValues.length; i++) {
+      for (let i = 1; i < postureValues.length; i++) { // Synchronous loop
         const row = postureValues[i];
         const appId = row[appIdColIndex]?.toString().trim();
   
-        if (appId && masterAppIds.has(appId)) {
+        if (appId && masterAppIds.has(appId)) { // Synchronous check
           if (!postureDataMap[appId]) {
             postureDataMap[appId] = {};
           }
           const appData = postureDataMap[appId];
   
+          // Using 'forEach' with arrow function callback
           dataColIndicesMap.forEach((colIndex, headerName) => {
             const value = row[colIndex];
             if (value !== null && typeof value !== 'undefined' && value !== "") {
@@ -352,15 +351,15 @@ async function main(workbook: ExcelScript.Workbook) {
   
     // --- 4. Prepare and Write Summary Sheet ---
     console.log(`Preparing summary sheet: ${SUMMARY_SHEET_NAME}`);
-    // Deleting/Adding sheets IS asynchronous
-    workbook.getWorksheet(SUMMARY_SHEET_NAME)?.delete(); // delete() doesn't need await
-    const summarySheet = workbook.addWorksheet(SUMMARY_SHEET_NAME); // addWorksheet doesn't need await
-    summarySheet.activate(); // activate() doesn't need await
+    workbook.getWorksheet(SUMMARY_SHEET_NAME)?.delete(); // Synchronous
+    const summarySheet = workbook.addWorksheet(SUMMARY_SHEET_NAME); // Synchronous
+    summarySheet.activate(); // Synchronous
   
     // Generating headers IS synchronous
     const summaryHeaders: string[] = [MASTER_APP_ID_HEADER];
     const headerConfigMapping: { header: string, config: PostureSheetConfig, sourceValueHeader?: string }[] = [];
-    POSTURE_SHEETS_CONFIG.forEach(config => { /* ... synchronous ... */
+    // Using 'forEach' with arrow function callback
+    POSTURE_SHEETS_CONFIG.forEach(config => {
       const aggType = config.aggregationType;
       switch (aggType) {
           case "Count": {
@@ -383,6 +382,7 @@ async function main(workbook: ExcelScript.Workbook) {
               break;
           }
           case "List": default: {
+              // Using 'forEach' with arrow function callback
               config.dataHeadersToPull.forEach(originalHeader => {
                   summaryHeaders.push(originalHeader);
                   headerConfigMapping.push({ header: originalHeader, config: config });
@@ -392,7 +392,7 @@ async function main(workbook: ExcelScript.Workbook) {
       }
     });
   
-    // Getting range and format objects is synchronous
+    // Getting range/format objects is synchronous
     const headerRange = summarySheet.getRangeByIndexes(0, 0, 1, summaryHeaders.length);
     const headerFormat = headerRange.getFormat();
     const headerFont = headerFormat.getFont();
@@ -401,36 +401,42 @@ async function main(workbook: ExcelScript.Workbook) {
     // Writing values IS asynchronous
     await headerRange.setValues([summaryHeaders]); // Await NEEDED
   
-    // Setting format properties is synchronous, no await needed
+    // Setting format properties IS synchronous (no await)
     headerFont.setBold(true);
     headerFill.setColor("#4472C4");
     headerFont.setColor("white");
   
     // --- 4b. Generate Summary Data Rows ---
-    const outputData: (string | number | boolean)[][] = [];
-    const masterAppIdArray = Array.from(masterAppIds).sort(); // Synchronous
+    const outputData: (string | number | boolean)[][] = []; // Synchronous init
+    // Using Array.from/sort is synchronous
+    const masterAppIdArray = Array.from(masterAppIds).sort();
   
     // Processing data in memory IS synchronous
+    // Using 'forEach' with arrow function callback
     masterAppIdArray.forEach(appId => {
       const row: (string | number | boolean)[] = [appId];
       const appMapData = postureDataMap[appId];
   
+      // Helper is synchronous
       const getValues = (headerName: string): (string | number | boolean)[] | undefined => {
           return appMapData?.[headerName];
       }
   
+      // Using 'forEach' with arrow function callback
       POSTURE_SHEETS_CONFIG.forEach(config => {
         const aggType = config.aggregationType;
         try {
-          // All aggregation logic here uses standard JS and is synchronous
+          // All aggregation logic IS synchronous
           switch (aggType) {
-            case "Count": { /* ... synchronous ... */
+            case "Count": {
               let outputValue: string | number = DEFAULT_VALUE_MISSING;
               const valuesToCount = getValues(config.countByHeader!);
               if (valuesToCount && valuesToCount.length > 0) {
                 const counts = new Map<string | number | boolean, number>();
+                // Using 'forEach' with arrow function callback
                 valuesToCount.forEach(value => { counts.set(value, (counts.get(value) || 0) + 1); });
                 const countEntries: string[] = [];
+                // Using Array.from/sort/forEach with arrow function callbacks
                 Array.from(counts.entries())
                     .sort((a, b) => a[0].toString().localeCompare(b[0].toString()))
                     .forEach(([value, count]) => { countEntries.push(`${value}: ${count}`); });
@@ -441,9 +447,10 @@ async function main(workbook: ExcelScript.Workbook) {
               row.push(outputValue);
               break;
             }
-            case "Sum": case "Average": case "Min": case "Max": { /* ... synchronous ... */
+            case "Sum": case "Average": case "Min": case "Max": {
               let outputValue: string | number | boolean = DEFAULT_VALUE_MISSING;
               const valuesToAggregate = getValues(config.valueHeaderForAggregation!);
+              // Using 'map' and 'filter' with arrow function callbacks
               const numericValues = valuesToAggregate?.map(parseNumber).filter(n => n !== null) as number[] | undefined;
   
               if (numericValues && numericValues.length > 0) {
@@ -458,12 +465,13 @@ async function main(workbook: ExcelScript.Workbook) {
               row.push(outputValue);
               break;
             }
-            case "UniqueList": { /* ... synchronous ... */
+            case "UniqueList": {
               let outputValue: string | number | boolean = DEFAULT_VALUE_MISSING;
               const headerForUniqueList = config.dataHeadersToPull[0];
               if (headerForUniqueList) {
                 const valuesToList = getValues(headerForUniqueList);
                 if (valuesToList && valuesToList.length > 0) {
+                  // Using Array.from/Set/map/sort with arrow function callbacks
                   const uniqueValues = Array.from(new Set(valuesToList.map(v => v?.toString() ?? "")));
                   uniqueValues.sort((a, b) => a.localeCompare(b));
                   outputValue = uniqueValues.join('\n');
@@ -472,11 +480,13 @@ async function main(workbook: ExcelScript.Workbook) {
               row.push(outputValue);
               break;
             }
-            case "List": default: { /* ... synchronous ... */
+            case "List": default: {
+              // Using 'forEach' with arrow function callback
               config.dataHeadersToPull.forEach(header => {
                 let listOutput: string | number | boolean = DEFAULT_VALUE_MISSING;
                 const valuesToList = getValues(header);
                 if (valuesToList && valuesToList.length > 0) {
+                   // Using 'map' and 'sort' with arrow function callbacks
                    const sortedValues = valuesToList.map(v => v?.toString() ?? "").sort((a,b) => a.localeCompare(b));
                    listOutput = sortedValues.join('\n');
                 }
@@ -492,6 +502,7 @@ async function main(workbook: ExcelScript.Workbook) {
           console.log(`Error during aggregation type "${aggType}" for App "${appId}", Sheet "${config.sheetName}": ${errorMessage}`);
   
           if (aggType === 'List') {
+            // Using 'forEach' with arrow function callback
             config.dataHeadersToPull.forEach(() => row.push('ERROR'));
           } else {
             row.push('ERROR');
@@ -503,9 +514,9 @@ async function main(workbook: ExcelScript.Workbook) {
   
   
     // --- 4c. Write Data to Sheet ---
-    let dataRange: ExcelScript.Range | undefined = undefined;
-    if (outputData.length > 0) {
-      dataRange = summarySheet.getRangeByIndexes(1, 0, outputData.length, summaryHeaders.length);
+    let dataRange: ExcelScript.Range | undefined = undefined; // Synchronous init
+    if (outputData.length > 0) { // Synchronous check
+      dataRange = summarySheet.getRangeByIndexes(1, 0, outputData.length, summaryHeaders.length); // Synchronous
       // Writing values IS asynchronous
       await dataRange.setValues(outputData); // Await NEEDED
       console.log(`Wrote ${outputData.length} rows of data to ${SUMMARY_SHEET_NAME}.`);
@@ -514,16 +525,16 @@ async function main(workbook: ExcelScript.Workbook) {
     }
   
     // --- 5. Apply Basic Formatting (No Conditional Formatting) ---
-    const usedRange = summarySheet.getUsedRange();
+    const usedRange = summarySheet.getUsedRange(); // Synchronous
     if (usedRange) {
-      // Getting format object is synchronous
+      // Getting format object IS synchronous
       const usedRangeFormat = usedRange.getFormat();
-      // Setting format properties is synchronous
+      // Setting format properties IS synchronous (no await)
       usedRangeFormat.setWrapText(true);
       usedRangeFormat.setVerticalAlignment(ExcelScript.VerticalAlignment.top);
       // Autofitting IS asynchronous
-      await usedRange.autofitColumns(); // Await NEEDED
-      // await usedRange.autofitRows(); // Optional - Await NEEDED if used
+      await usedRangeFormat.autofitColumns(); // CORRECTED: Called on format object, Await NEEDED
+      // await usedRangeFormat.autofitRows(); // Optional - Called on format object, Await NEEDED if used
       console.log("Applied basic formatting (Wrap Text, Top Align, Autofit Columns).");
     }
   
